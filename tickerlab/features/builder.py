@@ -15,12 +15,12 @@ def build_features(bars: pl.DataFrame) -> pl.DataFrame:
         ((pl.col("close") - pl.col("open")).abs() / (pl.col("high") - pl.col("low")).clip(1e-8, None)).alias("body_range"),
         ((pl.col("high") - pl.max_horizontal("open", "close")) / (pl.col("high") - pl.col("low")).clip(1e-8, None)).alias("upper_wick_ratio"),
         ((pl.min_horizontal("open", "close") - pl.col("low")) / (pl.col("high") - pl.col("low")).clip(1e-8, None)).alias("lower_wick_ratio"),
-        (pl.col("volume") / pl.col("volume").rolling_mean(20)).alias("vol_ratio_20"),
+        (pl.col("volume") / pl.col("volume").rolling_mean(20).clip(1e-8, None)).fill_null(1.0).fill_nan(1.0).alias("vol_ratio_20"),
     ).with_columns(
-        (pl.col("ema_fast") / pl.col("ema_slow")).alias("ema_ratio"),
-        ((pl.col("close") - pl.col("close").rolling_mean(20)) / pl.col("close").rolling_std(20)).alias("zscore_20"),
-        (pl.col("close") / pl.col("close").rolling_max(20) - 1).alias("drawdown_20"),
-        pl.col("range_pct").rolling_std(20).alias("realized_vol_20"),
+        (pl.col("ema_fast") / pl.col("ema_slow").clip(1e-8, None)).fill_null(1.0).fill_nan(1.0).alias("ema_ratio"),
+        ((pl.col("close") - pl.col("close").rolling_mean(20)) / pl.col("close").rolling_std(20).clip(1e-8, None)).fill_null(0.0).fill_nan(0.0).alias("zscore_20"),
+        (pl.col("close") / pl.col("close").rolling_max(20).clip(1e-8, None) - 1).fill_null(0.0).fill_nan(0.0).alias("drawdown_20"),
+        pl.col("range_pct").rolling_std(20).fill_null(0.0).fill_nan(0.0).alias("realized_vol_20"),
     )
 
     delta = pl.col("close").diff()

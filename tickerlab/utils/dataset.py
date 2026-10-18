@@ -27,5 +27,8 @@ def bar_dataset(features: pl.DataFrame, labels_bar: pl.DataFrame, horizon: int =
 
 
 def as_xy(df: pl.DataFrame) -> tuple:
-    sub = df.drop_nulls(FEATURES + ["target", "forward_return"])
+    cols = [c for c in FEATURES if c in df.columns]
+    targets = [c for c in ["target", "forward_return"] if c in df.columns]
+    all_cols = cols + targets
+    sub = df.with_columns([pl.col(c).fill_nan(None) for c in all_cols]).drop_nulls(all_cols)
     return sub.select(FEATURES).to_numpy(), sub["target"].to_numpy(), sub["forward_return"].to_numpy(), sub

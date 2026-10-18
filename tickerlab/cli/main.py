@@ -7,12 +7,12 @@ import typer
 
 from tickerlab.config.models import load_config
 from tickerlab.features.builder import build_features
-from tickerlab.ingest.service import load_from_csv, load_synthetic
+from tickerlab.ingest.service import get_realtime_quote, load_from_csv, load_from_yahoo, load_synthetic
 from tickerlab.labels.builder import build_bar_labels, build_event_labels
 from tickerlab.models.baseline import fit_logistic
 from tickerlab.patterns.structural import scan_structural
 from tickerlab.pivots.detector import detect_pivots
-from tickerlab.reporting.reporter import print_metrics
+from tickerlab.reporting.reporter import create_quote_table, print_metrics, print_quote
 from tickerlab.stats.metrics import compute_signal_metrics, stability_score
 from tickerlab.storage.io import dataset_path, load_frame, save_frame
 from tickerlab.utils.dataset import as_xy, event_dataset
@@ -49,16 +49,22 @@ def ingest(
     config: str | None = None,
     cache_dir: str = "data",
     export: str = "parquet",
+    seed: int | None = None,
+    period: str = "max",
 ):
     cfg = load_config(config)
     source = source or cfg.ingest.source
     input_path = input_path or cfg.ingest.input_path
+    seed = seed if seed is not None else cfg.ingest.seed
+    period = period or cfg.ingest.period
     if source == "csv":
         if not input_path:
             raise typer.BadParameter("--input-path es requerido cuando source=csv")
         bars = load_from_csv(input_path, symbol=symbol, timeframe=timeframe)
+    elif source in {"yahoo", "yfinance"}:
+        bars = load_from_yahoo(symbol=symbol, timeframe=timeframe, period=period)
     else:
-        bars = load_synthetic(symbol=symbol, timeframe=timeframe)
+        bars = load_synthetic(symbol=symbol, timeframe=timeframe, seed=seed)
     path = _save(Path(cache_dir), "bars", symbol, timeframe, bars, export=export)
     typer.echo(f"ingested={bars.height} path={path}")
 
@@ -166,3 +172,36 @@ def report_edge(symbol: str = "AAPL", timeframe: str = "1d", cache_dir: str = "d
         typer.echo(f"exported={out}")
     else:
         raise typer.BadParameter("format debe ser table/csv/json/parquet")
+
+
+@app.command("quote")
+def quote(
+    ticker: str | None = typer.Argument(None, help="Símbolo del ticker (ej. AAPL, IONQ, IAM.SN)"),
+    symbol: str | None = typer.Option(None, "--symbol", "-s", help="Símbolo del ticker"),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Monitorear y refrescar en tiempo real"),
+    interval: int = typer.Option(5, "--interval", "-i", help="Intervalo en segundos para modo watch"),
+):
+    """Muestra la cotización en tiempo real para activos de EE.UU. o Chile."""
+    sym = (ticker or symbol or "AAPL").strip().upper()
+    import time
+    from rich.live import Live
+
+    if not watch:
+        try:
+            q = get_realtime_quote(sym)
+            print_quote(q)
+        except Exception as e:
+            typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+    else:
+        typer.echo(f"Monitoreando {sym} cada {interval}s (presiona Ctrl+C para salir)...")
+        try:
+            with Live(create_quote_table(get_realtime_quote(sym)), refresh_per_second=1) as live:
+                while True:
+                    time.sleep(interval)
+                    live.update(create_quote_table(get_realtime_quote(sym)))
+        except KeyboardInterrupt:
+            typer.echo("\nMonitoreo finalizado.")
+        except Exception as e:
+            typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)

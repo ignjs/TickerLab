@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 
 
 class IngestConfig(BaseModel):
-    source: Literal["csv", "synthetic"] = "synthetic"
+    source: Literal["csv", "synthetic", "yahoo", "yfinance"] = "synthetic"
     input_path: str | None = None
     adjusted: bool = True
+    seed: int | None = None
+    period: str = "max"
 
 
 class PatternConfig(BaseModel):
