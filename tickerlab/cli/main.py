@@ -5,6 +5,7 @@ from pathlib import Path
 import polars as pl
 import typer
 
+from tickerlab.analysis.engine import analyze_ticker, fuzzy_suggest_symbol, normalize_symbol, validate_yahoo_symbol
 from tickerlab.config.models import load_config
 from tickerlab.features.builder import build_features
 from tickerlab.ingest.service import get_realtime_quote, load_from_csv, load_from_yahoo, load_synthetic
@@ -12,7 +13,12 @@ from tickerlab.labels.builder import build_bar_labels, build_event_labels
 from tickerlab.models.baseline import fit_logistic
 from tickerlab.patterns.structural import scan_structural
 from tickerlab.pivots.detector import detect_pivots
-from tickerlab.reporting.reporter import create_quote_table, print_metrics, print_quote
+from tickerlab.reporting.reporter import (
+    create_quote_table,
+    print_accessible_report,
+    print_metrics,
+    print_quote,
+)
 from tickerlab.stats.metrics import compute_signal_metrics, stability_score
 from tickerlab.storage.io import dataset_path, load_frame, save_frame
 from tickerlab.utils.dataset import as_xy, event_dataset
@@ -163,7 +169,31 @@ def score_now(symbol: str = "AAPL", timeframe: str = "1d", horizon: int = 5, cac
 
 @report_app.command("edge")
 def report_edge(symbol: str = "AAPL", timeframe: str = "1d", cache_dir: str = "data", format: str = "table"):
-    summary = load_frame(dataset_path(Path(cache_dir), "validation_summary", symbol, timeframe))
+    path = dataset_path(Path(cache_dir), "validation_summary", symbol, timeframe)
+    if not path.exists():
+        typer.secho(
+            f"\n⚠️  No se encontraron datos de validación para '{symbol}' (timeframe: {timeframe}).\n",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        typer.secho(
+            "Esto ocurre porque aún no se ha ejecutado el pipeline completo para este activo.\n"
+            "Para generar el reporte, puedes:\n\n"
+            f"  1. Ejecutar el análisis automático completo:\n"
+            f"     tickerlab analyze {symbol}\n\n"
+            f"  2. O ejecutar el pipeline paso a paso:\n"
+            f"     tickerlab ingest --symbol {symbol} --source yahoo\n"
+            f"     tickerlab features build --symbol {symbol}\n"
+            f"     tickerlab patterns scan --symbol {symbol}\n"
+            f"     tickerlab labels build --symbol {symbol}\n"
+            f"     tickerlab validate walkforward --symbol {symbol}\n"
+            f"     tickerlab report edge --symbol {symbol}\n",
+            fg=typer.colors.CYAN,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    summary = load_frame(path)
     if format == "table":
         print_metrics(summary.row(0, named=True))
     elif format in {"csv", "json", "parquet"}:
@@ -176,18 +206,21 @@ def report_edge(symbol: str = "AAPL", timeframe: str = "1d", cache_dir: str = "d
 
 @app.command("quote")
 def quote(
-    ticker: str | None = typer.Argument(None, help="Símbolo del ticker (ej. AAPL, IONQ, IAM.SN)"),
+    ticker: str | None = typer.Argument(None, help="Símbolo del ticker (ej. AAPL, IONQ, IAM.SN, IAM)"),
     symbol: str | None = typer.Option(None, "--symbol", "-s", help="Símbolo del ticker"),
     watch: bool = typer.Option(False, "--watch", "-w", help="Monitorear y refrescar en tiempo real"),
     interval: int = typer.Option(5, "--interval", "-i", help="Intervalo en segundos para modo watch"),
 ):
     """Muestra la cotización en tiempo real para activos de EE.UU. o Chile."""
-    sym = (ticker or symbol or "AAPL").strip().upper()
+    raw_sym = ticker or symbol or "AAPL"
+    sym, note = normalize_symbol(raw_sym)
     import time
     from rich.live import Live
 
     if not watch:
         try:
+            if note:
+                typer.secho(f"ℹ️  {note}", fg=typer.colors.CYAN)
             q = get_realtime_quote(sym)
             print_quote(q)
         except Exception as e:
@@ -205,3 +238,86 @@ def quote(
         except Exception as e:
             typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
+
+
+@app.command("analyze")
+def analyze(
+    ticker: str | None = typer.Argument(None, help="Símbolo del ticker a analizar (ej. AAPL, IONQ, IAM.SN, IAM)"),
+    symbol: str | None = typer.Option(None, "--symbol", "-s", help="Símbolo del ticker"),
+    source: str = typer.Option("yahoo", "--source", help="Fuente de datos: yahoo o synthetic"),
+    timeframe: str = typer.Option("1d", "--timeframe", "-t", help="Temporalidad de las velas (ej. 1d)"),
+    period: str = typer.Option("max", "--period", help="Período histórico a descargar (ej. max, 5y, 2y)"),
+    explain: bool = typer.Option(False, "--explain", "-e", help="Muestra glosario explicativo para principiantes"),
+    cache_dir: str = typer.Option("data", "--cache-dir", help="Directorio de almacenamiento de datos"),
+    seed: int | None = typer.Option(None, "--seed", help="Semilla manual si source=synthetic"),
+):
+    """
+    Ejecuta un análisis cuantitativo E2E 'One-Click' y muestra un reporte comprensible y visual.
+    """
+    from rich.console import Console
+
+    console = Console()
+    raw_sym = ticker or symbol or "AAPL"
+
+    with console.status(
+        f"[bold green]Analizando {raw_sym.upper()} (ingesta, indicadores, patrones y validación)...[/bold green]"
+    ):
+        try:
+            res = analyze_ticker(
+                raw_sym,
+                timeframe=timeframe,
+                source=source,
+                cache_dir=Path(cache_dir),
+                period=period,
+                seed=seed,
+            )
+        except ConnectionError:
+            typer.secho(
+                "\n⚠️  Error de conexión a Internet.\n"
+                "No se pudo conectar a Yahoo Finance. Verifica tu conexión de red e intenta nuevamente.\n"
+                "Si no tienes conexión, puedes usar datos sintéticos:\n\n"
+                f"  tickerlab analyze {raw_sym} --source synthetic\n",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        except TimeoutError:
+            typer.secho(
+                "\n⚠️  Tiempo de espera agotado.\n"
+                "Yahoo Finance no respondió a tiempo. Intenta nuevamente en unos segundos.\n",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        except ValueError as e:
+            error_msg = str(e)
+            suggestion = fuzzy_suggest_symbol(raw_sym)
+            if suggestion:
+                error_msg += f"\n\n💡 ¿Quisiste decir '{suggestion}'?"
+                if suggestion.endswith(".SN"):
+                    error_msg += " (En Chile las acciones llevan el sufijo .SN)"
+            typer.secho(f"\n❌ {error_msg}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        except Exception as e:
+            error_str = str(e).lower()
+            if "connection" in error_str or "network" in error_str or "unreachable" in error_str:
+                typer.secho(
+                    f"\n⚠️  Error de conexión: {e}\n"
+                    "Verifica tu conexión de red o usa datos sintéticos con: --source synthetic\n",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+            else:
+                typer.secho(f"\n❌ Error durante el análisis: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+
+    print_accessible_report(
+        symbol=res["symbol"],
+        quote=res["quote"],
+        summary=res["summary"],
+        score_now=res["score_now"],
+        events_count=res["events_count"],
+        explain=explain,
+        message=res["message"],
+        note=res["note"],
+    )
