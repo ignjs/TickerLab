@@ -1,22 +1,100 @@
-# TickerLab
+# TickerLab 📈
 
-TickerLab es una herramienta CLI orientada al análisis cuantitativo, detección de patrones técnicos y validación estadística out-of-sample en series temporales financieras (tickers bursátiles).
+**Análisis cuantitativo y detección de patrones técnicos con rigor estadístico.**
 
-El proyecto implementa un pipeline End-to-End (E2E) robusto y vectorizado que minimiza el sesgo de anticipación (*lookahead bias*) y la fuga temporal (*data leakage*).
+TickerLab es una herramienta CLI diseñada para transformar datos financieros brutos en señales predictivas validadas. Implementa un pipeline End-to-End (E2E) vectorizado que elimina el sesgo de anticipación (*lookahead bias*) y garantiza que los resultados sean estadísticamente significativos mediante validación *walk-forward*.
+
+### 🚀 Quick Start: Del Dato al Reporte en un Segundo
+
+La forma más rápida de experimentar la potencia de TickerLab es el comando `analyze`. Este automatiza todo el flujo (Ingesta $\rightarrow$ Features $\rightarrow$ Patrones $\rightarrow$ Validación $\rightarrow$ Reporte) en una sola ejecución:
+
+```bash
+# Análisis completo de un activo (ej. Apple)
+tickerlab analyze AAPL
+
+# Análisis con glosario explicativo para principiantes
+tickerlab analyze AAPL --explain
+
+# Análisis offline usando datos sintéticos reproducibles
+tickerlab analyze AAPL --source synthetic
+```
 
 ---
 
-## Tabla de Contenidos
+### ⚙️ El Core Tecnológico
 
-- [Requisitos Previos](#requisitos-previos)
-- [Instalación](#instalación)
-- [Pipeline Cuantitativo (Paso a Paso)](#pipeline-cuantitativo-paso-a-paso)
-- [Comandos CLI y Ejemplos](#comandos-cli-y-ejemplos)
-- [Formatos de Exportación](#formatos-de-exportación)
-- [Ingesta desde Archivos CSV](#ingesta-desde-archivos-csv)
-- [Testing y Benchmarks](#testing-y-benchmarks)
-- [Estructura del Proyecto](#estructura-del-proyecto)
-- [Solución de Problemas (Troubleshooting)](#solución-de-problemas-troubleshooting)
+TickerLab no es solo un conjunto de scripts, es un motor de análisis optimizado:
+
+*   **Velocidad Extrema**: Construido sobre **Polars** y **Numba** para procesamiento vectorizado y compilación JIT.
+*   **Rigor Temporal**: Implementa **Walk-Forward Validation** con purga temporal para evitar la fuga de datos (*data leakage*).
+*   **Persistencia Eficiente**: Almacenamiento en formato **Parquet** para alta compresión y lectura rápida.
+*   **Certificación Matemática**: Pruebas basadas en propiedades con **Hypothesis** para validar invariantes temporales.
+
+---
+
+### 🛠️ Pipeline de Análisis
+
+El sistema procesa la información en un flujo modular y determinista:
+
+**Datos Brutos** $\rightarrow$ `Ingest` $\rightarrow$ `Features` $\rightarrow$ `Patterns` $\rightarrow$ `Labels` $\rightarrow$ `Walk-Forward` $\rightarrow$ **Edge Score**
+
+Cada etapa persiste sus resultados en `data/`, permitiendo el control granular de cada fase del proceso.
+
+---
+
+### 📖 Guía de Referencia
+
+#### 1. Instalación Rápida
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .[dev]
+```
+*(Si tienes un procesador antiguo sin AVX2, ejecuta: `pip install "polars[rtcompat]"`)*
+
+#### 2. Control Avanzado (Flujo Detallado)
+Para quienes necesitan controlar cada parámetro, el pipeline se puede ejecutar paso a paso:
+
+| Fase | Comando | Propósito |
+| :--- | :--- | :--- |
+| **1. Ingesta** | `tickerlab ingest` | Carga datos de Yahoo Finance, CSV o Sintéticos |
+| **2. Features** | `tickerlab features build` | Calcula indicadores técnicos y Z-Scores |
+| **3. Patrones** | `tickerlab patterns scan` | Detecta Pivots y estructuras (Double Top/Bottom) |
+| **4. Etiquetas** | `tickerlab labels build` | Genera retornos forward multi-horizonte |
+| **5. Validación** | `tickerlab validate walkforward` | Entrena y valida el modelo OOS |
+| **6. Inferencia** | `tickerlab score now` | Probabilidad predictiva de la barra actual |
+| **7. Reporte** | `tickerlab report edge` | Métricas de rendimiento (Hit Rate, Sharpe, AUC) |
+
+#### 3. Utilidades Adicionales
+- **Cotizaciones en vivo**: `tickerlab quote SYMBOL`
+- **Exportación**: Usa `--format csv` o `--format json` en los reportes para extraer datos.
+
+---
+
+### 🧪 Calidad y Validación
+
+El proyecto incluye una suite de tests exhaustiva para garantizar la fiabilidad de las señales:
+- **Unit Tests**: Validación de cálculos matemáticos.
+- **Integration Tests**: Verificación del flujo E2E.
+- **Property Tests**: Certificación de no-fuga de datos (No-Leakage).
+- **Benchmarks**: Medición de latencia de procesamiento.
+
+Ejecutar todo con: `pytest`
+
+---
+
+### 📂 Estructura Simplificada
+- `tickerlab/`: Código fuente (CLI, Ingest, Features, Validation).
+- `data/`: Artefactos generados (Parquet).
+- `tests/`: Suites de validación y benchmarks.
+- `configs/`: Parámetros por defecto.
+
+---
+
+### 🆘 Troubleshooting
+- **`externally-managed-environment`**: Activa tu entorno virtual (`source .venv/bin/activate`).
+- **`Illegal instruction`**: Instala `polars[rtcompat]`.
+- **`FileNotFoundError`**: Asegúrate de seguir el orden del pipeline o usa `tickerlab analyze`.
+
 
 ---
 
@@ -24,6 +102,11 @@ El proyecto implementa un pipeline End-to-End (E2E) robusto y vectorizado que mi
 
 - **Python**: `>= 3.11` (probado en Python 3.12).
 - **Sistema Operativo**: Linux, macOS o Windows (WSL recomendado).
+- **Stack Tecnológico Clave**:
+  - **Polars**: Para procesamiento de datos vectorizado y eficiente en memoria.
+  - **Numba**: Para aceleración de funciones críticas mediante compilación JIT.
+  - **PyArrow**: Para persistencia de datos en formato Parquet.
+  - **Hypothesis**: Para validación de invariantes temporales (evitar data leakage).
 
 ---
 
@@ -89,9 +172,30 @@ El análisis en TickerLab sigue una secuencia modular y determinista. Cada coman
 
 ## Comandos CLI y Ejemplos
 
-A continuación se muestra un ciclo de trabajo completo para un símbolo (ej. `AAPL` o `IAM.SN`):
+### 🚀 Análisis Rápido (One-Click)
+
+Si no deseas ejecutar cada paso del pipeline manualmente, puedes utilizar el comando `analyze`. Este automatiza la ingesta, el cálculo de indicadores, la detección de patrones y la validación estadística en un solo paso, entregando un reporte visual completo.
+
+```bash
+# Análisis completo de un activo (ej. Apple)
+tickerlab analyze AAPL
+
+# Análisis con explicación detallada para principiantes
+tickerlab analyze AAPL --explain
+
+# Análisis utilizando datos sintéticos (sin conexión a internet)
+tickerlab analyze AAPL --source synthetic
+```
+
+---
+
+### Flujo de Trabajo Detallado (Paso a Paso)
+
+A continuación se muestra el ciclo de trabajo completo para un símbolo (ej. `AAPL` o `IAM.SN`) si deseas controlar cada etapa del proceso:
 
 ### Paso 1: Ingesta de datos
+Genera barras OHLCV sintéticas, carga datos históricos o importa archivos propios. El sistema normaliza automáticamente los nombres de las columnas (ej. `adj close` o `timestamp` se convierten a estándares internos).
+
 Genera barras OHLCV sintéticas o carga datos históricos:
 ```bash
 # Ingesta desde Yahoo Finance (Datos reales de Nueva York y Bolsa de Santiago):
@@ -104,7 +208,7 @@ tickerlab ingest --symbol IAM.SN --timeframe 1d --source yahoo
 tickerlab ingest --symbol SQM-B.SN --timeframe 1d --source yahoo
 tickerlab ingest --symbol CHILE.SN --timeframe 1d --source yahoo
 
-# Ingesta sintética (genera automáticamente una serie reproducible según el símbolo):
+# Ingesta sintética (genera automáticamente una serie reproducible basada en el hash del símbolo):
 tickerlab ingest --symbol AAPL --timeframe 1d --source synthetic
 
 # Opcional: Especificar una semilla manual en sintético
